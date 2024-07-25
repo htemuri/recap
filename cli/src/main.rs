@@ -1,11 +1,26 @@
 use std::{
     fs::File,
-    process::{Command, Stdio},
+    io::Write,
+    os::unix::process,
+    process::{id, Command, Stdio},
+    thread::sleep,
+    time::Duration,
 };
 
-fn main() {
-    // Create watcher process
+use nix::sys::stat;
+use nix::unistd::mkfifo;
 
+fn main() {
+    // create FIFO for communication
+    let fifopath = "/home/harristemuri/Projects/recap/comms";
+    match mkfifo(fifopath, stat::Mode::S_IRWXU) {
+        Err(e) => {
+            println!("Error creating FIFO: {}", e)
+        }
+        Ok(_) => println!("Created FIFO"),
+    }
+
+    // Create watcher process
     let output_file = File::create("test.out").expect("Failed to create output file");
     let _ = Command::new("/usr/bin/nohup")
         .arg("/home/harristemuri/Projects/recap/target/debug/watcher")
@@ -13,6 +28,17 @@ fn main() {
         .stderr(Stdio::null())
         .spawn()
         .expect("couldn't spawn watcher");
+
+    let mut buff = File::options().write(true).open(fifopath).unwrap();
+    println!("CLI Opened FIFO");
+    let res = buff.write(&id().to_string().as_bytes()).unwrap();
+    println!("Wrote {} bytes to FIFO", res);
+    println!("CLI PID: {}", id());
+
+    // loop {
+    //     println!("cli outputting");
+    //     sleep(Duration::from_secs(2))
+    // }
 
     // // fork to fish shell
 
