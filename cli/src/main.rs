@@ -24,21 +24,23 @@ fn main() {
     let output_file = File::create("test.out").expect("Failed to create output file");
     let _ = Command::new("/usr/bin/nohup")
         .arg("/home/harristemuri/Projects/recap/target/debug/watcher")
-        .stdout(Stdio::from(output_file))
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(output_file.try_clone().unwrap()))
+        .stderr(Stdio::from(output_file))
         .spawn()
         .expect("couldn't spawn watcher");
 
-    let mut buff = File::options().write(true).open(fifopath).unwrap();
-    println!("CLI Opened FIFO");
-    let res = buff.write(&id().to_string().as_bytes()).unwrap();
-    println!("Wrote {} bytes to FIFO", res);
+    {
+        let mut buff = File::options().write(true).open(fifopath).unwrap();
+        println!("CLI Opened FIFO");
+        let res: usize = buff.write(&id().to_string().as_bytes()).unwrap();
+        println!("Wrote {} bytes to FIFO", res);
+    }
     println!("CLI PID: {}", id());
 
-    // loop {
-    //     println!("cli outputting");
-    //     sleep(Duration::from_secs(2))
-    // }
+    loop {
+        println!("cli outputting");
+        sleep(Duration::from_secs(2))
+    }
 
     // // fork to fish shell
 

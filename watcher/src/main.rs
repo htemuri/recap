@@ -20,7 +20,7 @@ fn main() {
     let strpid = str::from_utf8(&pid).expect("failed to parse vec to string");
     let pid = Pid::from_raw(strpid.parse().expect("failed to parse str to pid"));
     println!("Watcher received PID: {}", strpid);
-
+    // let pid = Pid::from_raw("90684".parse().unwrap());
     attach_and_read_output(pid);
 
     // match ptrace::attach(pid) {
@@ -41,11 +41,19 @@ fn attach_and_read_output(pid: Pid) {
     }
 
     // Wait for the process to stop
-    wait::waitpid(pid, None).expect("Failed to wait for the process");
+    let res = wait::waitpid(pid, None).expect("Failed to wait for the process");
+    println!("Wait result: {:?}", res);
+
+    let reg = ptrace::getregs(pid).expect("failed to get regs");
+    println!("registers: {:?}", reg);
+
     // Read data from the process memory (example: read the first few bytes of the stack)
-    let address: *mut c_void = 0x7fffffffe000 as *mut c_void; // Adjust this address as needed
-    let data = ptrace::read(pid, address).expect("Failed to read from memory");
-    println!("Data from process: {}", data);
+    // let address: *mut c_void = 0x7fffffffe000 as *mut c_void; // Adjust this address as needed
+    let data = ptrace::read(pid, reg.rip as *mut c_void).expect("Failed to read from memory");
+    println!(
+        "Data from rip register address {} process: {:x}",
+        reg.rip, data as u64
+    );
 
     // Continue the target process
     ptrace::cont(pid, None).expect("Failed to continue the target process");
