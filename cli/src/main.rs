@@ -36,10 +36,11 @@ fn main() {
         println!("Wrote {} bytes to FIFO", res);
     }
     println!("CLI PID: {}", id());
-
+    let mut x = 1;
     loop {
-        println!("cli outputting");
-        sleep(Duration::from_secs(2))
+        println!("{}", x);
+        sleep(Duration::from_secs(2));
+        x += 1;
     }
 
     // // fork to fish shell
