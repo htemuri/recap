@@ -1,10 +1,15 @@
 use core::str;
-use nix::libc::{syscall, SYS_read, SYS_write};
+use nix::libc::{
+    SYS_clone3, SYS_fork, SYS_read, SYS_write, PTRACE_EVENT_CLONE, PTRACE_EVENT_FORK,
+    PTRACE_EVENT_VFORK, PTRACE_O_TRACEFORK, SIGTRAP,
+};
+use nix::sys::ptrace::Options;
+use nix::sys::wait::WaitStatus;
 use nix::sys::{ptrace, wait};
 use nix::unistd::Pid;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::Read;
-use std::ops::Add;
 use std::os::raw::c_void;
 // use std::os::unix::process::parent_id;
 // use std::process;
@@ -42,31 +47,69 @@ fn attach_and_read_output(pid: Pid) {
         Err(e) => println!("Error attaching to PID: {}", e),
         Ok(_) => println!("Attached to {}", pid),
     }
-
+    let _ = ptrace::setoptions(
+        pid,
+        Options::PTRACE_O_TRACESYSGOOD
+            | Options::PTRACE_O_TRACEEXIT
+            | Options::PTRACE_O_TRACEEXEC
+            | Options::PTRACE_O_TRACEFORK
+            | Options::PTRACE_O_TRACEVFORK
+            | Options::PTRACE_O_TRACECLONE,
+    )
+    .expect("Failed to set option");
     ptrace::syscall(pid, None).expect("Error waiting for syscall");
 
-    let mut looping = 0;
+    let mut index = 0;
 
     loop {
         // Wait for the process to stop
-        let _ = wait::waitpid(pid, None).expect("Failed to wait for the process");
-        // println!("Wait result: {:?}", res);
+        let res = wait::waitpid(pid, None).expect("Failed to wait for the process");
+        println!("Wait result: {:?}", res);
+        let reg: nix::libc::user_regs_struct = ptrace::getregs(pid).expect("failed to get regs");
 
-        let reg = ptrace::getregs(pid).expect("failed to get regs");
-        if reg.orig_rax == SYS_read.try_into().unwrap()
-            || reg.orig_rax == SYS_write.try_into().unwrap()
-            || reg.orig_rax == reg.rax
-        {
-            let mut string = String::new();
-            for i in 0..reg.rdx {
-                let data = ptrace::read(pid, (reg.rsi + i) as *mut c_void)
-                    .expect("Failed to read from memory");
-                string.push((data & 0xff) as u8 as char);
+        match res {
+            WaitStatus::PtraceEvent(_, _, event) => {
+                match event {
+                    PTRACE_EVENT_CLONE | PTRACE_EVENT_FORK | PTRACE_EVENT_VFORK => {
+                        let new_pid = ptrace::getevent(pid).unwrap();
+                        println!("Attaching to forked process with id: {}", new_pid);
+                        // ptrace::cont(Pid::from_raw(new_pid as i32), None)
+                        //     .expect("failed to continue parent process after being forked");
+                        attach_and_read_output(Pid::from_raw(new_pid as i32));
+                    }
+                    _ => continue,
+                }
             }
-            println!("Index: {}", looping);
-            print!("{}", string);
-            looping += 1;
+            _ => {
+                if reg.orig_rax == SYS_read.try_into().unwrap()
+                    || reg.orig_rax == SYS_write.try_into().unwrap()
+                    || reg.orig_rax == reg.rax
+                {
+                    let mut string = String::new();
+                    for i in 0..reg.rdx {
+                        let data = ptrace::read(pid, (reg.rsi + i) as *mut c_void)
+                            .expect("Failed to read from memory");
+                        string.push((data & 0xff) as u8 as char);
+                    }
+                    // every syscall is supposed to run twice apparently
+                    // so removing the duplicate when printing
+                    if index % 2 == 0 {
+                        print!("{}", string);
+                    }
+                    index += 1;
+                }
+            }
         }
+        // if res
+        //     == WaitStatus::PtraceEvent(pid, nix::sys::signal::Signal::SIGTRAP, PTRACE_EVENT_VFORK)
+        // {
+        //     let new_pid = ptrace::getevent(pid).unwrap();
+        //     println!("Attaching to forked process with id: {}", new_pid);
+        //     // ptrace::cont(Pid::from_raw(new_pid as i32), None)
+        //     //     .expect("failed to continue parent process after being forked");
+        //     attach_and_read_output(Pid::from_raw(new_pid as i32));
+        // }
+
         // println!(
         //     "registers: \nRDI: {:?}\nRSI: {:?}\nRDX: {:?}",
         //     reg.rdi, reg.rsi, reg.rdx

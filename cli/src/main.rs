@@ -1,14 +1,18 @@
 use std::{
     fs::File,
-    io::Write,
-    os::unix::process,
+    io::{self, Error, Write},
+    os::unix::process::{self, CommandExt},
     process::{id, Command, Stdio},
     thread::sleep,
     time::Duration,
 };
 
-use nix::sys::stat;
 use nix::unistd::mkfifo;
+use nix::{
+    sys::{ptrace, stat},
+    unistd::Pid,
+};
+use spawn_ptrace::CommandPtraceSpawn;
 
 fn main() {
     // create FIFO for communication
@@ -41,12 +45,23 @@ fn main() {
         println!("{}", x);
         sleep(Duration::from_secs(2));
         x += 1;
+        if x == 3 {
+            break;
+        }
     }
-
     // // fork to fish shell
-
-    // let mut sh = Command::new("fish").spawn().expect("cant open fish");
-    // let output = sh.wait().unwrap();
-    // println!("pid: {:?}", sh.id());
-    // println!("{:?}", output)
+    let mut sh = unsafe {
+        Command::new("ls")
+            .pre_exec(|| {
+                // Opt-in to ptrace.
+                ptrace::traceme().map_err(|e| match e {
+                    _ => Error::new(io::ErrorKind::Other, "unknown PTRACE_TRACEME error"),
+                })
+            })
+            .spawn()
+            .expect("cant open fish")
+    };
+    let output = sh.wait().unwrap();
+    println!("pid: {:?}", sh.id());
+    println!("{:?}", output)
 }
